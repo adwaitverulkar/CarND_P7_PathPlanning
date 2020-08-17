@@ -4,10 +4,12 @@
 #include <math.h>
 #include <string>
 #include <vector>
+#include "Eigen-3.3/Eigen/Dense"
 
 // for convenience
 using std::string;
 using std::vector;
+using std::ifstream;
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -152,6 +154,77 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s,
   double y = seg_y + d*sin(perp_heading);
 
   return {x,y};
+}
+
+vector<double> JMT(vector<double> &start, vector<double> &end, double T) {
+  /**
+   * Calculate the Jerk Minimizing Trajectory that connects the initial state
+   * to the final state in time T.
+   *
+   * @param start - the vehicles start location given as a length three array
+   *   corresponding to initial values of [s, s_dot, s_double_dot]
+   * @param end - the desired end state for vehicle. Like "start" this is a
+   *   length three array.
+   * @param T - The duration, in seconds, over which this maneuver should occur.
+   *
+   * @output an array of length 6, each value corresponding to a coefficent in 
+   *   the polynomial:
+   *   s(t) = a_0 + a_1 * t + a_2 * t**2 + a_3 * t**3 + a_4 * t**4 + a_5 * t**5
+   *
+   * EXAMPLE
+   *   > JMT([0, 10, 0], [10, 10, 0], 1)
+   *     [0.0, 10.0, 0.0, 0.0, 0.0, 0.0]
+   */
+  Eigen::MatrixXd A(3, 3);
+  
+  A << pow(T, 3), pow(T, 4), pow(T, 5),
+       3 * pow(T, 2), 4 * pow(T, 3), 5 * pow(T, 4),
+       6 * T, 12 * pow(T, 2), 20 * pow(T, 3);
+
+  Eigen::VectorXd B(3);
+  
+  B << end[0] - (start[0] + start[1] * T + 0.5 * start[2] * pow(T, 2)),
+       end[1] - (start[1] + start[2] * T),
+       end[2] - start[2];
+    
+  Eigen::VectorXd X = A.inverse() * B;
+  return {start[0], start[1], 0.5 * start[2], 
+          X[0], X[1], X[2]};
+}
+// Load state from .txt file for GNB
+vector<vector<double> > Load_State(string file_name) {
+  ifstream in_state_(file_name.c_str(), ifstream::in);
+  vector< vector<double >> state_out;
+  string line;
+    
+  while (getline(in_state_, line)) {
+    std::istringstream iss(line);
+    vector<double> x_coord;
+      
+    string token;
+    while (getline(iss,token,',')) {
+      x_coord.push_back(stod(token));
+    }
+    state_out.push_back(x_coord);
+  }
+
+  return state_out;
+}
+
+// Load labels from .txt file for GNB
+vector<string> Load_Label(string file_name) {
+  ifstream in_label_(file_name.c_str(), ifstream::in);
+  vector< string > label_out;
+  string line;
+  while (getline(in_label_, line)) {
+    std::istringstream iss(line);
+    string label;
+    iss >> label;
+    
+    label_out.push_back(label);
+  }
+    
+  return label_out; 
 }
 
 #endif  // HELPERS_H

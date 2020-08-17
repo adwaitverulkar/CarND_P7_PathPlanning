@@ -7,11 +7,16 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "helpers.h"
 #include "json.hpp"
+#include "spline.h"
+#include "classifier.h"
 
 // for convenience
 using nlohmann::json;
 using std::string;
 using std::vector;
+using std::cout;
+using std::endl;
+using std::ifstream;
 
 int main() {
   uWS::Hub h;
@@ -28,7 +33,7 @@ int main() {
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
 
-  std::ifstream in_map_(map_file_.c_str(), std::ifstream::in);
+  ifstream in_map_(map_file_.c_str(), ifstream::in);
 
   string line;
   while (getline(in_map_, line)) {
@@ -50,8 +55,46 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
+  //initially vehicle is in lane 1
+  int curr_lane = 1;
+
+  // Reference velocity
+  double ref_vel = 49.5; // mph
+
+  // Train a GNB classifier
+  vector<vector<double>> X_train = Load_State("../gnb_pred_data/train_states.txt");
+  vector<vector<double>> X_test  = Load_State("../gnb_pred_data/test_states.txt");
+  vector<string> Y_train = Load_Label("../gnb_pred_data/train_labels.txt");
+  vector<string> Y_test  = Load_Label("../gnb_pred_data/test_labels.txt");
+
+  cout << "Training GNB...\n" << endl;
+  cout << "X_train number of elements " << X_train.size() << endl;
+  cout << "X_train element size " << X_train[0].size() << endl;
+  cout << "Y_train number of elements " << Y_train.size() << "\n" << endl;
+
+  GNB gnb = GNB();
+  
+  gnb.train(X_train, Y_train);
+
+  cout << "Testing GNB...\n" << endl;
+  cout << "X_test number of elements " << X_test.size() << endl;
+  cout << "X_test element size " << X_test[0].size() << endl;
+  cout << "Y_test number of elements " << Y_test.size() << "\n" << endl;
+  
+  int score = 0;
+  for (int i = 0; i < X_test.size(); ++i) {
+    vector<double> coords = X_test[i];
+    string predicted = gnb.predict(coords);
+    if (predicted.compare(Y_test[i]) == 0) {
+      score += 1;
+    }
+  }
+
+  float fraction_correct = float(score) / Y_test.size();
+  cout << "GNB Accuracy: " << (100*fraction_correct) << "%\n" << endl;
+
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
-               &map_waypoints_dx,&map_waypoints_dy]
+               &map_waypoints_dx,&map_waypoints_dy,&curr_lane,&ref_vel]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -88,16 +131,118 @@ int main() {
           //   of the road.
           auto sensor_fusion = j[1]["sensor_fusion"];
 
-          json msgJson;
+          int prev_size = previous_path_x.size();
+
+          // START BEHAVIOR PLANNER
+
+          // 
+
+          if(prev_size > 0)
+            car_s = end_path_s;
+          
+          // END BEHAVIOR PLANNER
+
+          // START TRAJECTORY GENERATION
+
+          vector<double> ptsx, ptsy;
+
+          double ref_x = car_x, ref_y = car_y;
+          double ref_yaw = deg2rad(car_yaw);
+
+          if(prev_size < 2) {
+            double prev_car_x = car_x - cos(car_yaw);
+            double prev_car_y = car_y - sin(car_yaw);
+
+            ptsx.push_back(prev_car_x);
+            ptsx.push_back(car_x);
+
+            ptsy.push_back(prev_car_y);
+            ptsy.push_back(car_y);
+
+          }
+
+          else {
+            
+            ref_x = previous_path_x[prev_size -1];
+            ref_y = previous_path_y[prev_size -1];
+
+            double ref_x_prev = previous_path_x[prev_size - 2];
+            double ref_y_prev = previous_path_y[prev_size - 2];
+            ref_yaw = atan2(ref_y - ref_y_prev, ref_x - ref_x_prev);
+
+            ptsx.push_back(ref_x_prev);
+            ptsx.push_back(ref_x);
+
+            ptsy.push_back(ref_y_prev);
+            ptsy.push_back(ref_y);
+
+          }
+
+          // Add 30m spaced out points ahead of starting points
+          vector<double> next_wp0 = getXY(car_s + 30, 2 + 4 * curr_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          vector<double> next_wp1 = getXY(car_s + 60, 2 + 4 * curr_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          vector<double> next_wp2 = getXY(car_s + 90, 2 + 4 * curr_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+
+          ptsx.push_back(next_wp0[0]);
+          ptsx.push_back(next_wp1[0]);
+          ptsx.push_back(next_wp2[0]);
+
+          ptsy.push_back(next_wp0[1]);
+          ptsy.push_back(next_wp1[1]);
+          ptsy.push_back(next_wp2[1]);
+
+          for(int i = 0; i < ptsx.size(); ++i) {
+            double shift_x = ptsx[i] - ref_x;
+            double shift_y = ptsy[i] - ref_y;
+
+            ptsx[i] = shift_x * cos(-ref_yaw) - shift_y * sin(-ref_yaw);
+            ptsy[i] = shift_x * sin(-ref_yaw) + shift_y * cos(-ref_yaw);
+
+          }
+
+          // Initialize a spline
+          tk::spline s;
+
+          // Fit a spline through the points
+          s.set_points(ptsx, ptsy);
 
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          /**
-           * TODO: define a path made up of (x,y) points that the car will visit
-           *   sequentially every .02 seconds
-           */
+          for(int i = 0; i < previous_path_x.size(); ++i) {
+            next_x_vals.push_back(previous_path_x[i]);
+            next_y_vals.push_back(previous_path_y[i]);
+          }
 
+          double target_x = 30.0;
+          double target_y = s(target_x);
+          double target_dist = distance(target_x, target_y, 0.0, 0.0);
+
+          double x_add_on = 0;
+
+          for(int i = 1; i <= 50 - previous_path_x.size(); ++i) {
+            double N = target_dist/(0.02 * ref_vel/2.24);
+            double x_point = x_add_on + target_x / N;
+            double y_point = s(x_point);
+
+            x_add_on = x_point;
+
+            double x_ref = x_point;
+            double y_ref = y_point;
+
+            x_point = x_ref * cos(ref_yaw) - y_ref * sin(ref_yaw);
+            y_point = x_ref * sin(ref_yaw) + y_ref * cos(ref_yaw);
+
+            x_point += ref_x;
+            y_point += ref_y;
+
+            next_x_vals.push_back(x_point);
+            next_y_vals.push_back(y_point);
+          }
+
+          // END TRAJECTORY GENERATION
+
+          json msgJson;
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
