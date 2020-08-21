@@ -1,10 +1,15 @@
 #include "vehicle.h"
 #include "helpers.h"
 #include <fstream>
+#include <iostream>
+
+using std::cout;
+using std::endl;
 
 Vehicle::Vehicle() {
     this->curr_state = Vehicle::KL;
     this->ref_vel = 0.0;
+    this->int_lane = 1;
     this->curr_lane = 1;
     this->curr_state = Vehicle::KL;
     int prev_size = previous_path_x.size();
@@ -98,10 +103,12 @@ vector<vector<double>> Vehicle::generate_trajectory(states state,
         ptsx[i] = shift_x * cos(-ref_yaw) - shift_y * sin(-ref_yaw);
         ptsy[i] = shift_x * sin(-ref_yaw) + shift_y * cos(-ref_yaw);
 
+        cout << "(" << ptsx[i] << ", " << ptsy[i] << ")" << endl;
+
     }
     // Initialize a spline
     tk::spline s;
-
+    
     // Fit a spline through the points
     s.set_points(ptsx, ptsy);
 
