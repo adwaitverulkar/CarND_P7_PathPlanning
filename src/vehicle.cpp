@@ -8,7 +8,7 @@ using std::endl;
 
 Vehicle::Vehicle() {
     this->curr_state = Vehicle::KL;
-    this->ref_vel = 0.0;
+    this->ref_vel = 10.0;
     this->int_lane = 1;
     this->curr_lane = 1;
     this->curr_state = Vehicle::KL;
@@ -113,10 +113,12 @@ vector<vector<double>> Vehicle::generate_trajectory(states state,
     s.set_points(ptsx, ptsy);
 
     vector<vector<double>> trajectory;
+    vector<double> next_path_x;
+    vector<double> next_path_y;
 
     for(int i = 0; i < previous_path_x.size(); ++i) {
-        trajectory[0].push_back(previous_path_x[i]);
-        trajectory[1].push_back(previous_path_y[i]);
+        next_path_x.push_back(previous_path_x[i]);
+        next_path_y.push_back(previous_path_y[i]);
     }
 
     double horizon_y = s(horizon_x); // horizon x is distance dead ahead
@@ -140,9 +142,11 @@ vector<vector<double>> Vehicle::generate_trajectory(states state,
         y_point = x_ref * sin(ref_yaw) + y_ref * cos(ref_yaw);
         x_point += ref_x;
         y_point += ref_y;
-        trajectory[0].push_back(x_point);
-        trajectory[1].push_back(y_point);
+        next_path_x.push_back(x_point);
+        next_path_y.push_back(y_point);
     }
+    trajectory.push_back(next_path_x);
+    trajectory.push_back(next_path_y);
     return trajectory;
 }
 void Vehicle::set_unused_trajectory(vector<double> previous_x, vector<double> previous_y) {
