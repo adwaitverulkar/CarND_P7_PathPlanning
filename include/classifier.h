@@ -31,7 +31,9 @@ class GNB {
    * Predict with trained classifier
    */
   string predict(const vector<double> &sample);
-
+  void init();
+  vector<string> Load_Label(string file_name);
+  vector<vector<double> > Load_State(string file_name);
   vector<string> possible_labels = {"left","keep","right"};
   
   ArrayXd left_means;
