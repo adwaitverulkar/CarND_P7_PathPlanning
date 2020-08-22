@@ -8,7 +8,7 @@ using std::endl;
 
 Vehicle::Vehicle() {
     this->curr_state = Vehicle::KL;
-    this->ref_vel = 10.0;
+    this->ref_vel = 0.0;
     this->int_lane = 1;
     this->curr_lane = 1;
     this->curr_state = Vehicle::KL;
@@ -51,8 +51,7 @@ vector<vector<double>> Vehicle::choose_best_trajectory(vector<vector<double>> se
     vector<vector<double>> predictions = {{1.0, 2.0}, {1.0, 2.0}};
     return generate_trajectory(curr_state, predictions);
 }
-vector<vector<double>> Vehicle::generate_trajectory(states state, 
-                                                    vector<vector<double>> predictions) {
+vector<vector<double>> Vehicle::generate_trajectory(states state, vector<vector<double>> predictions) {
     vector<double> ptsx, ptsy;
 
     double ref_x = x, ref_y = y;
@@ -94,23 +93,33 @@ vector<vector<double>> Vehicle::generate_trajectory(states state,
     ptsy.push_back(next_wp1[1]);
     ptsy.push_back(next_wp2[1]);
 
-    for(int i = 0; i < ptsx.size(); ++i) {
+    vector<vector<double>> anchor_points, trajectory;
+    
+    anchor_points.push_back(ptsx);
+    anchor_points.push_back(ptsy);
+
+    trajectory = backfill(anchor_points, ref_x, ref_y, ref_yaw);
+
+    return trajectory;
+}
+vector<vector<double>> Vehicle::backfill(vector<vector<double>> anchor_points, double ref_x, double ref_y, double ref_yaw) {
+    
+    // Transform to local coordinates
+    for(int i = 0; i < anchor_points[0].size(); ++i) {
 
         // Transform to vehicle coordinates
-        double shift_x = ptsx[i] - ref_x;
-        double shift_y = ptsy[i] - ref_y;
+        double shift_x = anchor_points[0][i] - ref_x;
+        double shift_y = anchor_points[1][i] - ref_y;
 
-        ptsx[i] = shift_x * cos(-ref_yaw) - shift_y * sin(-ref_yaw);
-        ptsy[i] = shift_x * sin(-ref_yaw) + shift_y * cos(-ref_yaw);
-
-        cout << "(" << ptsx[i] << ", " << ptsy[i] << ")" << endl;
-
+        anchor_points[0][i] = shift_x * cos(-ref_yaw) - shift_y * sin(-ref_yaw);
+        anchor_points[1][i] = shift_x * sin(-ref_yaw) + shift_y * cos(-ref_yaw);
     }
+    
     // Initialize a spline
     tk::spline s;
     
     // Fit a spline through the points
-    s.set_points(ptsx, ptsy);
+    s.set_points(anchor_points[0], anchor_points[1]);
 
     vector<vector<double>> trajectory;
     vector<double> next_path_x;
@@ -128,6 +137,10 @@ vector<vector<double>> Vehicle::generate_trajectory(states state,
 
     for(int i = 1; i <= 50 - previous_path_x.size(); ++i) {
 
+        // Update ref_vel for every point to get efficient speed control
+        if(ref_vel < 49.5) {
+            ref_vel += 0.05;
+        }
         double N = target_dist/(0.02 * ref_vel/2.24);
         double x_point = x_add_on + horizon_x / N;
         double y_point = s(x_point);

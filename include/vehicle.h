@@ -27,6 +27,9 @@ public:
     // Given a possible next state, generate the appropriate trajectory to realize the next state.
     vector<vector<double>> generate_trajectory(states state, vector<vector<double>> predictions);
 
+    // Generate high density points from anchor points
+    vector<vector<double>> backfill(vector<vector<double>> anchor_points, double ref_x, double ref_y, double ref_yaw);
+    
     // return possible states from current state
     vector<states> successor_states();
 
