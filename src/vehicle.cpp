@@ -13,7 +13,9 @@ Vehicle::Vehicle() {
     this->curr_lane = 1;
     this->curr_state = Vehicle::KL;
     int prev_size = previous_path_x.size();
-    horizon_x = 30; // meters
+    horizon_m = 30.0; // meters
+    horizon_t = 5; // seconds
+    too_close = false;
     
     // Waypoint map to read from
     string map_file_ = "../data/highway_map.csv";
@@ -46,12 +48,19 @@ Vehicle::Vehicle() {
 
 Vehicle::~Vehicle() {}
 
-vector<vector<double>> Vehicle::choose_best_trajectory(vector<vector<double>> sensor_fusion) {
-    //placeholder code
-    vector<vector<double>> predictions = {{1.0, 2.0}, {1.0, 2.0}};
-    return generate_trajectory(curr_state, predictions);
+vector<vector<double>> Vehicle::choose_best_trajectory() {
+    
+    vector<Vehicle::states> next_states = successor_states();
+    double cost, min_cost;
+    for(int i = 0; i < next_states.size(); i++) {
+        if(i == 0) {
+            cost = calculate_cost(next_states[i]);
+        }
+    }
+    check_proximity();
+    return generate_trajectory(curr_state);
 }
-vector<vector<double>> Vehicle::generate_trajectory(states state, vector<vector<double>> predictions) {
+vector<vector<double>> Vehicle::generate_trajectory(states state) {
     vector<double> ptsx, ptsy;
 
     double ref_x = x, ref_y = y;
@@ -81,9 +90,9 @@ vector<vector<double>> Vehicle::generate_trajectory(states state, vector<vector<
         ptsy.push_back(ref_y);
     }
     // Add 30m spaced out points ahead of starting points
-    vector<double> next_wp0 = getXY(s + horizon_x, 2 + 4 * int_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-    vector<double> next_wp1 = getXY(s + 2 * horizon_x, 2 + 4 * int_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-    vector<double> next_wp2 = getXY(s + 3 * horizon_x, 2 + 4 * int_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+    vector<double> next_wp0 = getXY(s + horizon_m, 2 + 4 * int_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+    vector<double> next_wp1 = getXY(s + 2 * horizon_m, 2 + 4 * int_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+    vector<double> next_wp2 = getXY(s + 3 * horizon_m, 2 + 4 * int_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
     ptsx.push_back(next_wp0[0]);
     ptsx.push_back(next_wp1[0]);
@@ -129,20 +138,23 @@ vector<vector<double>> Vehicle::backfill(vector<vector<double>> anchor_points, d
         next_path_x.push_back(previous_path_x[i]);
         next_path_y.push_back(previous_path_y[i]);
     }
-
-    double horizon_y = s(horizon_x); // horizon x is distance dead ahead
-    double target_dist = distance(horizon_x, horizon_y, 0.0, 0.0);
+    double target_x = horizon_m;
+    double target_y = s(target_x); // horizon x is distance dead ahead
+    double target_dist = distance(target_x, target_y, 0.0, 0.0);
 
     double x_add_on = 0;
 
     for(int i = 1; i <= 50 - previous_path_x.size(); ++i) {
 
         // Update ref_vel for every point to get efficient speed control
-        if(ref_vel < 49.5) {
+        if(too_close) {
+            ref_vel -= 0.05;
+        }
+        else if(ref_vel < 49.5) {
             ref_vel += 0.05;
         }
         double N = target_dist/(0.02 * ref_vel/2.24);
-        double x_point = x_add_on + horizon_x / N;
+        double x_point = x_add_on + target_x / N;
         double y_point = s(x_point);
 
         x_add_on = x_point;
@@ -166,10 +178,65 @@ void Vehicle::set_unused_trajectory(vector<double> previous_x, vector<double> pr
     this->previous_path_x = previous_x;
     this->previous_path_y = previous_y;
 }
+void Vehicle::generate_predictions(vector<vector<double>> sensor_fusion) {
+    // clear previous predictions
+    predictions.clear();
 
-          
-
+    //0 - ID, 1 - x, 2 - y, 3 - x_dot, 4 - y_dot, 5 - s, 6 - d
+    for(int i = 0; i < sensor_fusion.size(); i++) {
+        vector<double> sample, prediction;
+        sample.push_back(sensor_fusion[i][5]);
+        sample.push_back(sensor_fusion[i][6]);
+        double x_dot = sensor_fusion[i][3];
+        double y_dot = sensor_fusion[i][4];
+        double speed = distance(x_dot, y_dot, 0, 0);
+        double theta = atan2(y_dot, x_dot); // heading angle of target car
+        vector<double> sd_vel = getFrenet(x_dot, y_dot, theta, map_waypoints_x, map_waypoints_y);
+        sample.push_back(sd_vel[0]);
+        sample.push_back(sd_vel[1]);
+        string behavior = gnb.predict(sample);
+        prediction.push_back(sensor_fusion[i][5] + speed * 0.02 * previous_path_x.size());
         
+        if(behavior == "keep") {
+            prediction.push_back(sensor_fusion[i][6]);
+        }
+        if(behavior == "left") {
+            prediction.push_back(sensor_fusion[i][6] - 4);
+        }
+        if(behavior == "right") {
+            prediction.push_back(sensor_fusion[i][6] + 4);
+        }
+        predictions.push_back(prediction);
+    }
+}
+          
+vector<Vehicle::states> Vehicle::successor_states() {
+    vector<Vehicle::states> next_states;
+    next_states.push_back(Vehicle::KL);
+    if(this->curr_state == Vehicle::KL) {
+        if(curr_lane > 0)
+            next_states.push_back(Vehicle::LCL);
+        if(curr_lane < 2)
+            next_states.push_back(Vehicle::LCR);
+    } 
+    return next_states;
+}
+
+void Vehicle::check_proximity() {
+    for(int i = 0; i < predictions.size(); ++i) {
+        double traffic_s = predictions[i][0];
+        double traffic_d = predictions[i][1];
+        if((traffic_d > (2 + 4*curr_lane-2)) && (traffic_d < (2 + 4*curr_lane+2))) {
+            if(traffic_s > s && (traffic_s - s) < 30.0) {
+                too_close = true;
+            }
+        }
+    }
+}
+double Vehicle::calculate_cost(Vehicle::states next_state) {
+    return 2.0;
+}
+
         
 
         

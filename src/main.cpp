@@ -47,6 +47,15 @@ int main() {
           ego.yaw = j[1]["yaw"];
           ego.speed = j[1]["speed"];
 
+          // Set ego vehicles lane
+          for(int i = 0; i < 3; ++i) {
+            if(ego.d >= 0 + i*4 && ego.d <= 4 + i*4) {
+              ego.curr_lane = i;
+            }
+          }
+
+          ego.too_close = false;
+
           // Previous path data given to the Planner
           auto previous_path_x = j[1]["previous_path_x"];
           auto previous_path_y = j[1]["previous_path_y"];
@@ -65,11 +74,12 @@ int main() {
           // Sensor Fusion Data, a list of all other cars on the same side 
           //   of the road.
           auto sensor_fusion = j[1]["sensor_fusion"];
+          ego.generate_predictions(sensor_fusion);
           
           json msgJson;
 
-          msgJson["next_x"] = ego.choose_best_trajectory(sensor_fusion)[0];
-          msgJson["next_y"] = ego.choose_best_trajectory(sensor_fusion)[1];
+          msgJson["next_x"] = ego.choose_best_trajectory()[0];
+          msgJson["next_y"] = ego.choose_best_trajectory()[1];
 
           auto msg = "42[\"control\","+ msgJson.dump()+"]";
 

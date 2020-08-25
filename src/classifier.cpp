@@ -40,6 +40,8 @@ GNB::GNB() {
   right_sds << 0,0,0,0;
   
   right_prior = 0;
+
+  this->init();
 }
 
 GNB::~GNB() {}
@@ -173,10 +175,8 @@ void GNB::init() {
   cout << "X_train number of elements " << X_train.size() << endl;
   cout << "X_train element size " << X_train[0].size() << endl;
   cout << "Y_train number of elements " << Y_train.size() << "\n" << endl;
-
-  GNB gnb = GNB();
   
-  gnb.train(X_train, Y_train);
+  this->train(X_train, Y_train);
 
   cout << "Testing GNB...\n" << endl;
   cout << "X_test number of elements " << X_test.size() << endl;
@@ -186,7 +186,7 @@ void GNB::init() {
   int score = 0;
   for (int i = 0; i < X_test.size(); ++i) {
     vector<double> coords = X_test[i];
-    string predicted = gnb.predict(coords);
+    string predicted = this->predict(coords);
     if (predicted.compare(Y_test[i]) == 0) {
       score += 1;
     }
