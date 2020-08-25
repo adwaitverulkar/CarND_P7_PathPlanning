@@ -1,6 +1,5 @@
 #pragma once
 #include <vector>
-#include "classifier.h"
 #include "spline.h"
 
 using std::vector;
@@ -39,9 +38,8 @@ public:
     // return cost of future state
     double calculate_cost(states next_state);
 
-    double x, y, s, d, yaw, speed, ref_vel;
-    int int_lane, curr_lane;
-    GNB gnb;
+    double x, y, s, d, yaw, speed, ref_vel, target_vel;
+    int int_lane, curr_lane, path_size;
     vector<double> previous_path_x, previous_path_y;
     vector<vector<double>> predictions;
     states curr_state;
@@ -54,4 +52,5 @@ public:
     vector<double> map_waypoints_s;
     vector<double> map_waypoints_dx;
     vector<double> map_waypoints_dy;
+    
 };

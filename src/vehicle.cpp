@@ -6,13 +6,18 @@
 using std::cout;
 using std::endl;
 
+constexpr double SPEED_WEIGHT = 0.5;
+constexpr double DISTANCE_WEIGHT = 0.5;
+
 Vehicle::Vehicle() {
     this->curr_state = Vehicle::KL;
-    this->ref_vel = 0.0;
+    this->ref_vel = 0.0; // mph
+    this->target_vel = 49.5; // mph
     this->int_lane = 1;
     this->curr_lane = 1;
     this->curr_state = Vehicle::KL;
     int prev_size = previous_path_x.size();
+    this->path_size = 15; // 10 points in the future
     horizon_m = 30.0; // meters
     horizon_t = 5; // seconds
     too_close = false;
@@ -144,13 +149,13 @@ vector<vector<double>> Vehicle::backfill(vector<vector<double>> anchor_points, d
 
     double x_add_on = 0;
 
-    for(int i = 1; i <= 50 - previous_path_x.size(); ++i) {
+    for(int i = 1; i <= path_size - previous_path_x.size(); ++i) {
 
         // Update ref_vel for every point to get efficient speed control
         if(too_close) {
             ref_vel -= 0.05;
         }
-        else if(ref_vel < 49.5) {
+        else if(ref_vel < target_vel) {
             ref_vel += 0.05;
         }
         double N = target_dist/(0.02 * ref_vel/2.24);
@@ -185,27 +190,23 @@ void Vehicle::generate_predictions(vector<vector<double>> sensor_fusion) {
     //0 - ID, 1 - x, 2 - y, 3 - x_dot, 4 - y_dot, 5 - s, 6 - d
     for(int i = 0; i < sensor_fusion.size(); i++) {
         vector<double> sample, prediction;
-        sample.push_back(sensor_fusion[i][5]);
-        sample.push_back(sensor_fusion[i][6]);
-        double x_dot = sensor_fusion[i][3];
-        double y_dot = sensor_fusion[i][4];
-        double speed = distance(x_dot, y_dot, 0, 0);
-        double theta = atan2(y_dot, x_dot); // heading angle of target car
-        vector<double> sd_vel = getFrenet(x_dot, y_dot, theta, map_waypoints_x, map_waypoints_y);
-        sample.push_back(sd_vel[0]);
-        sample.push_back(sd_vel[1]);
-        string behavior = gnb.predict(sample);
-        prediction.push_back(sensor_fusion[i][5] + speed * 0.02 * previous_path_x.size());
+
+        double traffic_xdot = sensor_fusion[i][3];
+        double traffic_ydot = sensor_fusion[i][4];
+
+        double traffic_s = sensor_fusion[i][5];
+        double traffic_d = sensor_fusion[i][6];
+
+        double traffic_speed = distance(traffic_xdot, traffic_ydot, 0.0, 0.0);
+
+        prediction.push_back(traffic_s + traffic_speed * 0.02 * previous_path_x.size());
         
-        if(behavior == "keep") {
-            prediction.push_back(sensor_fusion[i][6]);
-        }
-        if(behavior == "left") {
-            prediction.push_back(sensor_fusion[i][6] - 4);
-        }
-        if(behavior == "right") {
-            prediction.push_back(sensor_fusion[i][6] + 4);
-        }
+        // Assume traffic never changes lane
+        prediction.push_back(traffic_d);
+
+        // Push velocity to follow vehicle ahead
+        prediction.push_back(traffic_speed);
+        
         predictions.push_back(prediction);
     }
 }
@@ -224,17 +225,18 @@ vector<Vehicle::states> Vehicle::successor_states() {
 
 void Vehicle::check_proximity() {
     for(int i = 0; i < predictions.size(); ++i) {
+        double future_s = s + speed * previous_path_x.size() * 0.02;
         double traffic_s = predictions[i][0];
         double traffic_d = predictions[i][1];
         if((traffic_d > (2 + 4*curr_lane-2)) && (traffic_d < (2 + 4*curr_lane+2))) {
-            if(traffic_s > s && (traffic_s - s) < 30.0) {
+            if(traffic_s > future_s && (traffic_s - future_s) < 20.0) {
                 too_close = true;
             }
         }
     }
 }
 double Vehicle::calculate_cost(Vehicle::states next_state) {
-    return 2.0;
+    double distance_cost = 1 - exp(-1/2.0);
 }
 
         

@@ -68,8 +68,10 @@ int main() {
 
           int prev_size = previous_path_x.size();
 
-          if(prev_size > 0)
+          if(prev_size > 0) {
             ego.s = end_path_s;
+            ego.d = end_path_d;
+          }
 
           // Sensor Fusion Data, a list of all other cars on the same side 
           //   of the road.
