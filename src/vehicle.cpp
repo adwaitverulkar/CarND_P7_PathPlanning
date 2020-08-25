@@ -7,7 +7,7 @@ using std::cout;
 using std::endl;
 
 constexpr double SPEED_WEIGHT = 0.5;
-constexpr double DISTANCE_WEIGHT = 0.5;
+constexpr double DISTANCE_WEIGHT = 1.0 - SPEED_WEIGHT;
 
 Vehicle::Vehicle() {
     this->curr_state = Vehicle::KL;
@@ -17,9 +17,9 @@ Vehicle::Vehicle() {
     this->curr_lane = 1;
     this->curr_state = Vehicle::KL;
     int prev_size = previous_path_x.size();
-    this->path_size = 15; // 10 points in the future
-    horizon_m = 30.0; // meters
-    horizon_t = 5; // seconds
+    this->path_size = 100; // 10 points in the future
+    horizon_m = 30; // meters
+    horizon_t = 1; // seconds
     too_close = false;
     
     // Waypoint map to read from
@@ -57,15 +57,33 @@ vector<vector<double>> Vehicle::choose_best_trajectory() {
     
     vector<Vehicle::states> next_states = successor_states();
     double cost, min_cost;
+    Vehicle::states final_state;
+    check_proximity();
     for(int i = 0; i < next_states.size(); i++) {
         if(i == 0) {
             cost = calculate_cost(next_states[i]);
+            min_cost = cost;
+            final_state = next_states[i];
+        } else {
+            cost = calculate_cost(next_states[i]);
+            if (min_cost > cost) {
+                min_cost = cost;
+                final_state = next_states[i];
+            }
         }
+        cout << next_states[i] << "\t" << cost << "\t\t";
     }
-    check_proximity();
-    return generate_trajectory(curr_state);
+    cout << endl;
+    if (final_state == Vehicle::KL) {
+        int_lane = curr_lane;
+    } else if(final_state == Vehicle::LCL) {
+        int_lane = curr_lane - 1;
+    } else if(final_state == Vehicle::LCR) {
+        int_lane = curr_lane + 1;
+    }
+    return generate_trajectory();
 }
-vector<vector<double>> Vehicle::generate_trajectory(states state) {
+vector<vector<double>> Vehicle::generate_trajectory() {
     vector<double> ptsx, ptsy;
 
     double ref_x = x, ref_y = y;
@@ -200,7 +218,7 @@ void Vehicle::generate_predictions(vector<vector<double>> sensor_fusion) {
         double traffic_speed = distance(traffic_xdot, traffic_ydot, 0.0, 0.0);
 
         prediction.push_back(traffic_s + traffic_speed * 0.02 * previous_path_x.size());
-        
+
         // Assume traffic never changes lane
         prediction.push_back(traffic_d);
 
@@ -236,7 +254,41 @@ void Vehicle::check_proximity() {
     }
 }
 double Vehicle::calculate_cost(Vehicle::states next_state) {
-    double distance_cost = 1 - exp(-1/2.0);
+    double distance, speed, distance_cost, speed_cost, total_cost;
+    int future_lane;
+    bool assigned = false;
+    double future_s = s + speed * previous_path_x.size() * 0.02;
+
+    if(next_state == Vehicle::KL) {
+        future_lane = curr_lane;
+    } if(next_state == Vehicle::LCL) {
+        future_lane = curr_lane - 1;
+    } if(next_state == Vehicle::LCR) {
+        future_lane = curr_lane + 1;
+    }
+
+    for(int i = 0; i < predictions.size(); ++i) {
+        double traffic_s = predictions[i][0];
+        double traffic_d = predictions[i][1];
+        double traffic_speed = predictions[i][2];
+        if((traffic_d > (2 + 4*future_lane-2)) && (traffic_d < (2 + 4*future_lane+2))) {
+            if(traffic_s > future_s) {
+                if(!assigned) {
+                    distance = traffic_s - future_s;
+                    speed = traffic_speed - speed;
+                    assigned = true;
+                } else if(distance > traffic_s - future_s) {
+                    distance = traffic_s - future_s;
+                    speed = traffic_speed - speed;
+                }
+            }
+        }
+    }
+
+    distance_cost = 1 - exp(-1 / distance);
+    speed_cost = 1 - exp(-1 / speed);
+    total_cost = DISTANCE_WEIGHT * distance_cost + SPEED_WEIGHT * speed_cost;
+    return total_cost;
 }
 
         
