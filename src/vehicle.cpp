@@ -6,7 +6,7 @@
 using std::cout;
 using std::endl;
 
-constexpr double SPEED_WEIGHT = 0.5;
+constexpr double SPEED_WEIGHT = 0.0;
 constexpr double DISTANCE_WEIGHT = 1.0 - SPEED_WEIGHT;
 
 Vehicle::Vehicle() {
@@ -17,7 +17,7 @@ Vehicle::Vehicle() {
     this->curr_lane = 1;
     this->curr_state = Vehicle::KL;
     int prev_size = previous_path_x.size();
-    this->path_size = 100; // 10 points in the future
+    this->path_size = 30; // points in the future
     horizon_m = 30; // meters
     horizon_t = 1; // seconds
     too_close = false;
@@ -58,28 +58,23 @@ vector<vector<double>> Vehicle::choose_best_trajectory() {
     vector<Vehicle::states> next_states = successor_states();
     double cost, min_cost;
     Vehicle::states final_state;
-    check_proximity();
+    min_cost = 9999.0;
     for(int i = 0; i < next_states.size(); i++) {
-        if(i == 0) {
-            cost = calculate_cost(next_states[i]);
+        cost = calculate_cost(next_states[i]);
+        if (min_cost > cost) {
             min_cost = cost;
             final_state = next_states[i];
-        } else {
-            cost = calculate_cost(next_states[i]);
-            if (min_cost > cost) {
-                min_cost = cost;
-                final_state = next_states[i];
-            }
         }
         cout << next_states[i] << "\t" << cost << "\t\t";
     }
     cout << endl;
-    if (final_state == Vehicle::KL) {
-        int_lane = curr_lane;
-    } else if(final_state == Vehicle::LCL) {
-        int_lane = curr_lane - 1;
-    } else if(final_state == Vehicle::LCR) {
-        int_lane = curr_lane + 1;
+    check_proximity();
+    if(too_close) {
+        if(final_state == Vehicle::LCL) {
+            int_lane = curr_lane - 1;
+        } else if(final_state == Vehicle::LCR) {
+            int_lane = curr_lane + 1;
+        }
     }
     return generate_trajectory();
 }
@@ -243,21 +238,20 @@ vector<Vehicle::states> Vehicle::successor_states() {
 
 void Vehicle::check_proximity() {
     for(int i = 0; i < predictions.size(); ++i) {
-        double future_s = s + speed * previous_path_x.size() * 0.02;
         double traffic_s = predictions[i][0];
         double traffic_d = predictions[i][1];
         if((traffic_d > (2 + 4*curr_lane-2)) && (traffic_d < (2 + 4*curr_lane+2))) {
-            if(traffic_s > future_s && (traffic_s - future_s) < 20.0) {
+            if((traffic_s > s) && (traffic_s - s) < 30.0) {
                 too_close = true;
             }
         }
     }
 }
 double Vehicle::calculate_cost(Vehicle::states next_state) {
-    double distance, speed, distance_cost, speed_cost, total_cost;
+    double distance = 99999.0, speed = 99999.0, distance_cost, speed_cost, total_cost = 1.0;
     int future_lane;
     bool assigned = false;
-    double future_s = s + speed * previous_path_x.size() * 0.02;
+    double future_s = this->s + this->speed * previous_path_x.size() * 0.02;
 
     if(next_state == Vehicle::KL) {
         future_lane = curr_lane;
@@ -272,22 +266,22 @@ double Vehicle::calculate_cost(Vehicle::states next_state) {
         double traffic_d = predictions[i][1];
         double traffic_speed = predictions[i][2];
         if((traffic_d > (2 + 4*future_lane-2)) && (traffic_d < (2 + 4*future_lane+2))) {
-            if(traffic_s > future_s) {
-                if(!assigned) {
-                    distance = traffic_s - future_s;
-                    speed = traffic_speed - speed;
-                    assigned = true;
-                } else if(distance > traffic_s - future_s) {
-                    distance = traffic_s - future_s;
-                    speed = traffic_speed - speed;
-                }
+            if(abs(traffic_s - future_s) < distance) {
+                distance = abs(traffic_s - future_s);
+            }
+            if(traffic_speed < speed) {
+                speed = traffic_speed;
             }
         }
     }
-
-    distance_cost = 1 - exp(-1 / distance);
-    speed_cost = 1 - exp(-1 / speed);
-    total_cost = DISTANCE_WEIGHT * distance_cost + SPEED_WEIGHT * speed_cost;
+    if(distance < 25.0) {
+        total_cost = 1;
+        return total_cost;
+    } else {
+        distance_cost = 1 - exp(-1 / distance);
+        speed_cost = 1 - exp(-1 / speed);
+        total_cost = DISTANCE_WEIGHT * distance_cost + SPEED_WEIGHT * speed_cost;
+    }
     return total_cost;
 }
 
