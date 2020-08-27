@@ -17,7 +17,7 @@ Vehicle::Vehicle() {
     this->curr_lane = 1;
     this->curr_state = Vehicle::KL;
     int prev_size = previous_path_x.size();
-    this->path_size = 30; // points in the future
+    this->path_size = 20; // points in the future
     horizon_m = 30; // meters
     horizon_t = 1; // seconds
     too_close = false;
@@ -65,10 +65,8 @@ vector<vector<double>> Vehicle::choose_best_trajectory() {
             min_cost = cost;
             final_state = next_states[i];
         }
-        cout << next_states[i] << "\t" << cost << "\t\t";
     }
-    cout << endl;
-    check_proximity();
+    check_proximity(); // Check if we are too close to vehicle ahead
     if(too_close) {
         if(final_state == Vehicle::LCL) {
             int_lane = curr_lane - 1;
